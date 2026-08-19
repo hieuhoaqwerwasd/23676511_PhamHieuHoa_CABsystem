@@ -616,3 +616,5 @@ STT	Nội dung cần làm rõ	Bên xác nhận
 9	Kênh notification được sử dụng trong MVP.	Business
 10	Thời gian lưu dữ liệu chuyến, giao dịch và audit log.	Business / Compliance
 11	Những thao tác nào Operation được phép override.	Business / Operation
+
+
