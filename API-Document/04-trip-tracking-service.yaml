@@ -1,0 +1,279 @@
+openapi: 3.0.3
+info:
+  title: CAB - Trip & Tracking Service API
+  description: >
+    API quản lý vòng đời chuyến (Trip lifecycle), cập nhật trạng thái bởi Driver
+    và theo dõi chuyến gần realtime bởi Customer.
+    Nguồn: FR-029 → FR-038, FR-082 → FR-084, UC-05, UC-06, UC-16, AC-05.*, AC-06.*, AC-14.*.
+  version: "1.0.0"
+servers:
+  - url: https://api.cab.example.com/v1
+
+tags:
+  - name: Trip
+  - name: Trip Status Update
+  - name: Trip History
+
+paths:
+  /trips/{tripId}:
+    get:
+      tags: [Trip]
+      summary: Xem chi tiết chuyến (trạng thái, driver, vị trí)
+      description: FR-036, UC-05, AC-05.01, AC-05.03, AC-05.04, AC-05.05
+      operationId: getTripById
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripIdPath'
+      responses:
+        '200':
+          description: Chi tiết chuyến
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trip'
+        '403':
+          description: Trip không thuộc về Customer đang truy vấn (AC-05.05)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Không tìm thấy chuyến
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /trips/{tripId}/status-history:
+    get:
+      tags: [Trip]
+      summary: Xem lịch sử thay đổi trạng thái của chuyến
+      description: FR-038, AC-06.07, entity TripStatusHistory
+      operationId: getTripStatusHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripIdPath'
+      responses:
+        '200':
+          description: Danh sách các lần thay đổi trạng thái
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TripStatusHistoryEntry'
+
+  /trips/{tripId}/status:
+    post:
+      tags: [Trip Status Update]
+      summary: Driver cập nhật trạng thái chuyến theo vòng đời
+      description: >
+        FR-030 → FR-034, UC-16, AC-06.01 → AC-06.06, AC-06.08, AC-21 (idempotent).
+        Body chỉ định trạng thái đích; hệ thống kiểm tra transition hợp lệ dựa trên
+        state hiện tại trước khi cập nhật (FR-034):
+        DRIVER_ASSIGNED → DRIVER_EN_ROUTE → DRIVER_ARRIVED →
+        PASSENGER_PICKED_UP → IN_PROGRESS → COMPLETED.
+      operationId: updateTripStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripIdPath'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Duplicate status update không tạo duplicate business event (AC-06.08)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetStatus]
+              properties:
+                targetStatus:
+                  $ref: '#/components/schemas/TripStatus'
+      responses:
+        '200':
+          description: Trạng thái được cập nhật thành công, ghi vào Trip Status History
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trip'
+        '409':
+          description: State transition không hợp lệ với trạng thái hiện tại (AC-06.06)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Người thực hiện không phải Driver được phân công cho chuyến
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /customers/me/trips:
+    get:
+      tags: [Trip History]
+      summary: Xem lịch sử các chuyến đã phát sinh của Customer hiện tại
+      description: FR-082, FR-083, UC-06, AC-14.01 → AC-14.05
+      operationId: listMyTripHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TripStatus'
+        - name: fromDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Lịch sử chuyến của Customer (chỉ xem được của chính mình - FR-083)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Trip'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TripIdPath:
+      name: tripId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    TripStatus:
+      type: string
+      description: Vòng đời chuyến theo mermaid state diagram mục 7.12 SRS
+      enum:
+        - DRIVER_ASSIGNED
+        - DRIVER_EN_ROUTE
+        - DRIVER_ARRIVED
+        - PASSENGER_PICKED_UP
+        - IN_PROGRESS
+        - COMPLETED
+        - PAYMENT_PENDING
+        - PAID
+        - PAYMENT_FAILED
+
+    Trip:
+      type: object
+      properties:
+        tripId:
+          type: string
+          format: uuid
+        bookingId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+          format: uuid
+        vehicleId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/TripStatus'
+        pickupLocation:
+          type: object
+          properties:
+            latitude:
+              type: number
+            longitude:
+              type: number
+        dropoffLocation:
+          type: object
+          properties:
+            latitude:
+              type: number
+            longitude:
+              type: number
+        driverCurrentLocation:
+          type: object
+          nullable: true
+          description: Trả degraded/null nếu Location Provider unavailable (AC-05.04, AC-20.07)
+          properties:
+            latitude:
+              type: number
+            longitude:
+              type: number
+            updatedAt:
+              type: string
+              format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    TripStatusHistoryEntry:
+      type: object
+      properties:
+        tripId:
+          type: string
+          format: uuid
+        fromStatus:
+          $ref: '#/components/schemas/TripStatus'
+        toStatus:
+          $ref: '#/components/schemas/TripStatus'
+        changedAt:
+          type: string
+          format: date-time
+        changedBy:
+          type: string
+          description: Actor thực hiện thay đổi (driverId hoặc operationStaffId)
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
