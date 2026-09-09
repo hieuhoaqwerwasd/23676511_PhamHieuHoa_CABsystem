@@ -1,0 +1,657 @@
+openapi: 3.0.3
+info:
+  title: CAB - Operation & Admin Service API
+  description: >
+    API cho Operation Staff (giám sát chuyến, xử lý exception, tra cứu) và
+    Admin (quản lý User, Role/Permission, Audit Log).
+    Nguồn: FR-069 → FR-077, FR-085 → FR-087, UC-17 → UC-22, AC-16.*, AC-17.*, AC-18.*, AC-19.*.
+  version: "1.0.0"
+servers:
+  - url: https://api.cab.example.com/v1
+
+tags:
+  - name: Operation Monitoring
+  - name: Operation Exception Handling
+  - name: Admin - User Management
+  - name: Admin - Role Management
+  - name: Audit Log
+
+paths:
+  /operations/trips:
+    get:
+      tags: [Operation Monitoring]
+      summary: Xem danh sách các chuyến đang hoạt động
+      description: FR-069, FR-070, UC-17, AC-16.02, AC-16.03
+      operationId: listActiveTrips
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Danh sách chuyến đang hoạt động kèm trạng thái hiện tại
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OperationTripView'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /operations/trips/search:
+    get:
+      tags: [Operation Monitoring]
+      summary: Tìm kiếm và tra cứu lịch sử chuyến
+      description: FR-072
+      operationId: searchTripsForOperation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: customerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: driverId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: fromDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Kết quả tìm kiếm chuyến
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OperationTripView'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+
+  /operations/trips/{tripId}:
+    get:
+      tags: [Operation Monitoring]
+      summary: Xem chi tiết chuyến, bao gồm Driver được phân công
+      description: FR-071
+      operationId: getTripForOperation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripIdPath'
+      responses:
+        '200':
+          description: Chi tiết chuyến
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationTripView'
+        '404':
+          description: Không tìm thấy chuyến
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /operations/trips/{tripId}/exceptions:
+    post:
+      tags: [Operation Exception Handling]
+      summary: Xử lý ngoại lệ / can thiệp thủ công vào chuyến gặp lỗi
+      description: >
+        FR-074, FR-075, UC-19, AC-17.01 → AC-17.06.
+        Mọi thao tác thành công đều tạo Audit Log (actor, action, timestamp, entity).
+      operationId: handleTripException
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TripExceptionRequest'
+      responses:
+        '200':
+          description: Trip state được cập nhật, Audit Log được tạo (AC-17.03, AC-17.04)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationTripView'
+        '403':
+          description: Operation Staff không có permission thực hiện action này (AC-17.02)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /operations/transactions:
+    get:
+      tags: [Operation Monitoring]
+      summary: Tra cứu thông tin giao dịch/thanh toán phục vụ hỗ trợ khách hàng
+      description: FR-073, UC-20
+      operationId: searchTransactionsForOperation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tripId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: customerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Danh sách giao dịch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        paymentId:
+                          type: string
+                          format: uuid
+                        tripId:
+                          type: string
+                          format: uuid
+                        amount:
+                          type: number
+                        status:
+                          type: string
+                        method:
+                          type: string
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+
+  /admin/users:
+    get:
+      tags: [Admin - User Management]
+      summary: Xem danh sách User
+      description: FR-076, UC-21, AC-18.01
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Danh sách User
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserAdminView'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Admin - User Management]
+      summary: Tạo User nội bộ (Operation Staff / Admin)
+      description: FR-076, UC-21
+      operationId: createUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateRequest'
+      responses:
+        '201':
+          description: User được tạo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAdminView'
+
+  /admin/users/{userId}:
+    put:
+      tags: [Admin - User Management]
+      summary: Cập nhật thông tin / trạng thái / role của User
+      description: FR-076, UC-21, AC-18.04 (audit khi thay đổi role/permission)
+      operationId: updateUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+      responses:
+        '200':
+          description: User được cập nhật
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserAdminView'
+        '403':
+          description: Chỉ Admin mới có quyền thực hiện (AC-18.02, FR-077)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /admin/roles:
+    get:
+      tags: [Admin - Role Management]
+      summary: Xem danh sách Role và quyền hạn
+      description: UC-22
+      operationId: listRoles
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Danh sách Role
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Role'
+    post:
+      tags: [Admin - Role Management]
+      summary: Tạo Role mới
+      description: FR-076, UC-22
+      operationId: createRole
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleUpsertRequest'
+      responses:
+        '201':
+          description: Role được tạo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/roles/{roleId}:
+    put:
+      tags: [Admin - Role Management]
+      summary: Cập nhật quyền hạn của một Role
+      description: FR-076, UC-22, AC-18.04
+      operationId: updateRole
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleUpsertRequest'
+      responses:
+        '200':
+          description: Role được cập nhật, Audit Log được ghi nhận
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/audit-logs:
+    get:
+      tags: [Audit Log]
+      summary: Tra cứu Audit Log
+      description: >
+        FR-085 → FR-087, AC-19.01 → AC-19.08.
+        Chỉ role có quyền phù hợp mới được xem (FR-087).
+      operationId: listAuditLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: entity
+          in: query
+          schema:
+            type: string
+        - name: entityId
+          in: query
+          schema:
+            type: string
+        - name: actor
+          in: query
+          schema:
+            type: string
+        - name: fromDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Danh sách Audit Log
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditLog'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+        '403':
+          description: Role không có quyền xem Audit Log (FR-087)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TripIdPath:
+      name: tripId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Forbidden:
+      description: Không có quyền thực hiện thao tác này
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    OperationTripView:
+      type: object
+      properties:
+        tripId:
+          type: string
+          format: uuid
+        bookingId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    TripExceptionRequest:
+      type: object
+      required: [action, reason]
+      properties:
+        action:
+          type: string
+          description: Loại can thiệp thủ công, ví dụ FORCE_COMPLETE, REASSIGN_DRIVER, CANCEL
+          example: FORCE_COMPLETE
+        targetStatus:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          description: Lý do can thiệp, được ghi vào Audit Log
+
+    UserAdminView:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+        phoneNumber:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [CUSTOMER, DRIVER, OPERATION, ADMIN]
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        createdAt:
+          type: string
+          format: date-time
+
+    UserCreateRequest:
+      type: object
+      required: [fullName, phoneNumber, role, password]
+      properties:
+        fullName:
+          type: string
+        phoneNumber:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [OPERATION, ADMIN]
+        password:
+          type: string
+          format: password
+
+    UserUpdateRequest:
+      type: object
+      properties:
+        fullName:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [CUSTOMER, DRIVER, OPERATION, ADMIN]
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+
+    Role:
+      type: object
+      properties:
+        roleId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: OPERATION_STAFF
+        permissions:
+          type: array
+          items:
+            type: string
+            example: TRIP_MONITOR_VIEW
+
+    RoleUpsertRequest:
+      type: object
+      required: [name, permissions]
+      properties:
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+
+    AuditLog:
+      type: object
+      description: FR-085 → FR-087
+      properties:
+        auditLogId:
+          type: string
+          format: uuid
+        actor:
+          type: string
+          description: User/Staff thực hiện hành động
+        action:
+          type: string
+          example: MANUAL_STATUS_UPDATE
+        entity:
+          type: string
+          example: Trip
+        entityId:
+          type: string
+        oldValue:
+          type: string
+          nullable: true
+        newValue:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
