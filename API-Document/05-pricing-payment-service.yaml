@@ -1,0 +1,376 @@
+openapi: 3.0.3
+info:
+  title: CAB - Pricing & Payment Service API
+  description: >
+    API tính cước và xử lý thanh toán (tiền mặt / điện tử), bao gồm retry và
+    callback từ Payment Provider.
+    Nguồn: FR-039 → FR-053, UC-07, UC-08, UC-10, UC-23, AC-09.*, AC-10.*, AC-11.*, AC-12.*, AC-21.04.
+  version: "1.0.0"
+servers:
+  - url: https://api.cab.example.com/v1
+
+tags:
+  - name: Fare
+  - name: Payment
+  - name: Payment Provider Callback
+
+paths:
+  /trips/{tripId}/fare:
+    get:
+      tags: [Fare]
+      summary: Xem số tiền cần thanh toán của chuyến
+      description: FR-039 → FR-042, AC-09.*
+      operationId: getTripFare
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripIdPath'
+      responses:
+        '200':
+          description: Thông tin cước phí (được tính khi Driver hoàn tất chuyến - FR-040)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fare'
+        '404':
+          description: Chưa có Fare cho chuyến (chuyến chưa hoàn tất)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /trips/{tripId}/payments:
+    post:
+      tags: [Payment]
+      summary: Customer chọn phương thức thanh toán và khởi tạo nghĩa vụ thanh toán
+      description: FR-044, UC-10, UC-23
+      operationId: createPaymentForTrip
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method:
+                  type: string
+                  enum: [CASH, ELECTRONIC]
+      responses:
+        '201':
+          description: Payment (nghĩa vụ thanh toán) được tạo với trạng thái PENDING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+
+  /payments/{paymentId}:
+    get:
+      tags: [Payment]
+      summary: Xem chi tiết một Payment
+      operationId: getPaymentById
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PaymentIdPath'
+      responses:
+        '200':
+          description: Chi tiết Payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '404':
+          description: Không tìm thấy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /payments/{paymentId}/electronic/charge:
+    post:
+      tags: [Payment]
+      summary: Khởi tạo giao dịch thanh toán điện tử tới Payment Provider
+      description: >
+        FR-045, UC-23 Main Flow, AC-11.01 → AC-11.08.
+        Tạo một PaymentAttempt và gửi yêu cầu giao dịch tới Payment Provider.
+      operationId: chargeElectronicPayment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PaymentIdPath'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Bắt buộc để tránh double-charge (AC-21.04)
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Yêu cầu thanh toán đã được gửi tới Provider, đang chờ kết quả
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentAttempt'
+        '503':
+          description: >
+            Payment Provider không khả dụng; Booking/Trip không bị rollback
+            chỉ vì lỗi này (AC-20.01, AC-20.02)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /payments/{paymentId}/electronic/callback:
+    post:
+      tags: [Payment Provider Callback]
+      summary: Webhook nhận kết quả giao dịch từ Payment Provider
+      description: >
+        FR-046, FR-047, FR-048, UC-23. Idempotent: một nghĩa vụ thanh toán
+        không bị ghi nhận thành nhiều giao dịch thành công do gọi lại nhiều lần
+        (FR-051, AC-21.04). CAB chỉ lưu reference của giao dịch, không lưu dữ
+        liệu thẻ nhạy cảm (FR-052, AC-11.08).
+      operationId: handleElectronicPaymentCallback
+      parameters:
+        - $ref: '#/components/parameters/PaymentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentProviderCallback'
+      responses:
+        '200':
+          description: Callback đã được xử lý (kể cả khi là callback trùng lặp)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '400':
+          description: Callback không hợp lệ / không xác định được Payment tương ứng
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /payments/{paymentId}/retry:
+    post:
+      tags: [Payment]
+      summary: Customer thực hiện lại thanh toán sau khi thất bại
+      description: FR-050, UC-08, AC-12.01 → AC-12.06
+      operationId: retryPayment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PaymentIdPath'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Yêu cầu retry được ghi nhận, tạo PaymentAttempt mới
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentAttempt'
+        '409':
+          description: Payment không ở trạng thái cho phép retry, hoặc đã vượt số lần retry cho phép
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /payments/{paymentId}/cash-confirm:
+    post:
+      tags: [Payment]
+      summary: Driver xác nhận đã nhận thanh toán tiền mặt
+      description: FR-044, UC-10, AC-10.01 → AC-10.04
+      operationId: confirmCashPayment
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PaymentIdPath'
+      responses:
+        '200':
+          description: Payment chuyển sang trạng thái PAID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '409':
+          description: Payment không ở trạng thái CASH/PENDING để xác nhận
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /customers/me/payments:
+    get:
+      tags: [Payment]
+      summary: Xem lịch sử thanh toán của Customer hiện tại
+      description: FR-053, UC-07
+      operationId: listMyPayments
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Danh sách Payment của Customer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Payment'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TripIdPath:
+      name: tripId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PaymentIdPath:
+      name: paymentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Fare:
+      type: object
+      description: FR-039 → FR-043, entity Fare (MVP dùng công thức giá cơ bản, chưa surge pricing)
+      properties:
+        fareId:
+          type: string
+          format: uuid
+        tripId:
+          type: string
+          format: uuid
+        baseFare:
+          type: number
+          format: double
+        distanceFare:
+          type: number
+          format: double
+        totalAmount:
+          type: number
+          format: double
+        currency:
+          type: string
+          example: VND
+        calculatedAt:
+          type: string
+          format: date-time
+
+    PaymentMethod:
+      type: string
+      enum: [CASH, ELECTRONIC]
+
+    PaymentStatus:
+      type: string
+      enum: [PENDING, PROCESSING, PAID, FAILED, RETRYING]
+
+    Payment:
+      type: object
+      description: entity Payment — nghĩa vụ/giao dịch thanh toán của một Trip
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        tripId:
+          type: string
+          format: uuid
+        fareId:
+          type: string
+          format: uuid
+        method:
+          $ref: '#/components/schemas/PaymentMethod'
+        amount:
+          type: number
+          format: double
+        status:
+          $ref: '#/components/schemas/PaymentStatus'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PaymentAttempt:
+      type: object
+      description: FR-051, entity PaymentAttempt — một lần thử thanh toán (hỗ trợ retry)
+      properties:
+        attemptId:
+          type: string
+          format: uuid
+        paymentId:
+          type: string
+          format: uuid
+        attemptNumber:
+          type: integer
+        status:
+          type: string
+          enum: [PENDING, SUCCESS, FAILED]
+        providerReference:
+          type: string
+          description: Tham chiếu giao dịch phía Payment Provider (không lưu dữ liệu thẻ - FR-052)
+        createdAt:
+          type: string
+          format: date-time
+
+    PaymentProviderCallback:
+      type: object
+      required: [providerReference, result]
+      properties:
+        providerReference:
+          type: string
+        result:
+          type: string
+          enum: [SUCCESS, FAILED]
+        message:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
