@@ -1,0 +1,142 @@
+openapi: 3.0.3
+info:
+  title: CAB - Rating Service API
+  description: >
+    API cho Customer đánh giá Driver sau khi chuyến hoàn tất.
+    Nguồn: FR-078 → FR-081, UC-09, AC-15.01 → AC-15.06.
+  version: "1.0.0"
+servers:
+  - url: https://api.cab.example.com/v1
+
+tags:
+  - name: Rating
+
+paths:
+  /trips/{tripId}/rating:
+    post:
+      tags: [Rating]
+      summary: Customer đánh giá Driver sau khi chuyến kết thúc
+      description: >
+        FR-078 → FR-081, UC-09, AC-15.01 → AC-15.06.
+        Chỉ Trip đã COMPLETED, chỉ Customer sở hữu Trip, và mỗi Trip chỉ được
+        đánh giá tối đa một lần.
+      operationId: rateTrip
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RatingRequest'
+      responses:
+        '201':
+          description: Rating được lưu thành công (AC-15.06)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rating'
+        '400':
+          description: Rating nằm ngoài range được phép (AC-15.05)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Customer không sở hữu Trip (AC-15.03)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Trip chưa completed hoặc đã được rating trước đó (AC-15.02, AC-15.04)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      tags: [Rating]
+      summary: Xem đánh giá của một chuyến (nếu có)
+      operationId: getTripRating
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripIdPath'
+      responses:
+        '200':
+          description: Rating của chuyến
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rating'
+        '404':
+          description: Chuyến chưa được đánh giá
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TripIdPath:
+      name: tripId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    RatingRequest:
+      type: object
+      required: [score]
+      properties:
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: Thang điểm do hệ thống cấu hình (FR-079), ví dụ 1-5
+        comment:
+          type: string
+          nullable: true
+
+    Rating:
+      type: object
+      properties:
+        ratingId:
+          type: string
+          format: uuid
+        tripId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+          format: uuid
+        score:
+          type: integer
+        comment:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
