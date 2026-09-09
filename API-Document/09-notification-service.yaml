@@ -1,0 +1,150 @@
+openapi: 3.0.3
+info:
+  title: CAB - Notification Service API
+  description: >
+    API tra cứu trạng thái gửi thông báo (dùng cho Operation/Admin khi cần kiểm
+    tra lỗi gửi thông báo tới Customer/Driver). Việc gửi thông báo tự động
+    (booking accepted, driver arrived, trip completed, payment result...) được
+    hệ thống nội bộ trigger, module nghiệp vụ không phụ thuộc trực tiếp vào
+    một Notification Provider cụ thể (FR-061, FR-062, AC-22.03, AC-22.04).
+    Nguồn: FR-054 → FR-062, UC-24, AC-13.*, AC-20.04 → AC-20.06.
+  version: "1.0.0"
+servers:
+  - url: https://api.cab.example.com/v1
+
+tags:
+  - name: Notification
+
+paths:
+  /notifications:
+    get:
+      tags: [Notification]
+      summary: Tra cứu danh sách notification đã phát sinh
+      description: FR-060, dùng để kiểm tra lỗi gửi thông báo
+      operationId: listNotifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: recipientId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          schema:
+            type: string
+            example: BOOKING_ACCEPTED
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Danh sách notification
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalItems:
+                    type: integer
+
+  /notifications/{notificationId}/deliveries:
+    get:
+      tags: [Notification]
+      summary: Xem trạng thái gửi (delivery) của một notification theo từng provider
+      description: FR-060, AC-20.06, entity NotificationDelivery
+      operationId: listNotificationDeliveries
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Danh sách lần gửi (có thể nhiều provider/kênh)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationDelivery'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Notification:
+      type: object
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+        recipientId:
+          type: string
+          format: uuid
+        recipientType:
+          type: string
+          enum: [CUSTOMER, DRIVER]
+        type:
+          type: string
+          description: >
+            Ví dụ: BOOKING_RECEIVED (FR-054), DRIVER_ASSIGNED (FR-055),
+            DRIVER_ARRIVED (FR-056), TRIP_COMPLETED (FR-057),
+            PAYMENT_RESULT (FR-058), NEW_TRIP_REQUEST (FR-059)
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    NotificationDelivery:
+      type: object
+      properties:
+        deliveryId:
+          type: string
+          format: uuid
+        notificationId:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          example: PUSH_PROVIDER_A
+        status:
+          type: string
+          enum: [SENT, FAILED, PENDING]
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
