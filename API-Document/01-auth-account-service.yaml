@@ -1,0 +1,249 @@
+openapi: 3.0.3
+info:
+  title: CAB - Authentication & Account Service API
+  description: >
+    API quản lý đăng ký, đăng nhập và hồ sơ cơ bản của Customer / Driver.
+    Nguồn: FR-001 → FR-008, UC-01, UC-02, UC-03, AC-01, AC-02.
+  version: "1.0.0"
+servers:
+  - url: https://api.cab.example.com/v1
+    description: Base URL (placeholder cho môi trường test)
+
+tags:
+  - name: Auth
+  - name: Customer Profile
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Đăng ký tài khoản Customer
+      description: FR-001, UC-01, AC-01.01 → AC-01.04
+      operationId: registerCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Tạo tài khoản thành công (AC-01.01)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUser'
+        '400':
+          description: Dữ liệu đăng ký không hợp lệ (AC-01.03)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Tài khoản đã tồn tại (AC-01.02)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Đăng nhập (Customer / Driver / Operation / Admin)
+      description: FR-002, FR-003, FR-007, UC-02, AC-02.01 → AC-02.04
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Đăng nhập thành công, hệ thống xác định role (AC-02.01, AC-02.04)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Sai thông tin xác thực (AC-02.02)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Tài khoản inactive, từ chối truy cập (AC-02.03)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /customers/me:
+    get:
+      tags: [Customer Profile]
+      summary: Xem thông tin cá nhân của Customer hiện tại
+      description: FR-004, UC-03
+      operationId: getMyCustomerProfile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Thông tin profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '401':
+          description: Chưa đăng nhập
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [Customer Profile]
+      summary: Cập nhật thông tin cá nhân cơ bản của Customer
+      description: FR-004, UC-03
+      operationId: updateMyCustomerProfile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerUpdateRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          description: Dữ liệu không hợp lệ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Chưa đăng nhập
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [phoneNumber, password, fullName]
+      properties:
+        phoneNumber:
+          type: string
+          example: "+84901234567"
+        email:
+          type: string
+          format: email
+          nullable: true
+        password:
+          type: string
+          format: password
+          minLength: 8
+        fullName:
+          type: string
+          example: "Nguyen Van A"
+
+    LoginRequest:
+      type: object
+      required: [identifier, password]
+      properties:
+        identifier:
+          type: string
+          description: Số điện thoại hoặc email dùng để đăng nhập
+        password:
+          type: string
+          format: password
+
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          example: 3600
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    AuthUser:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [CUSTOMER, DRIVER, OPERATION, ADMIN]
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        phoneNumber:
+          type: string
+        email:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Customer:
+      type: object
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+        phoneNumber:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        createdAt:
+          type: string
+          format: date-time
+
+    CustomerUpdateRequest:
+      type: object
+      properties:
+        fullName:
+          type: string
+        email:
+          type: string
+          format: email
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
